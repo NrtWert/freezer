@@ -1,87 +1,109 @@
+#include <GyverSegment.h> // библиотека для TM1637
+#include <TimerMs.h> // библиотека для создания таймеров
 
-#include <GyverTM1637.h>
-#include <TimerMs.h>
-
-TimerMs tmr025(250, 1, 0);
+// объявление таймеров (мс, запущен/нет, период/таймер)
 TimerMs tmr05(500, 1, 0);
 TimerMs tmr1(1000, 1, 0);
-TimerMs tmr10(10000, 1, 1);
+TimerMs tmr10(10000, 0, 1);
 
-const int buttonPin = 2;  // the number of the pushbutton pin
-const int ledPin = 4;    // the number of the LED pin
-const int piezoPin = 12;
-const int dispclkPin = 8;
-const int dispdioPin = 9;
+// пины индикатора
+#define CLK_PIN 8
+#define DIO_PIN 9
 
-// variables will change:
-int buttonState = 0;  // variable for reading the pushbutton status
+#define HYR_PIN 3 // пин гиркона
 
-int iOpenCounter = 0;
-int iSecCounter = 0;
-bool bIsWarning = false;
-bool bIsOpened = false;
+#define LED_PIN 4 // пин светодиода
 
-uint32_t Now, clocktimer;
-bool flag = false;
+#define BUZZ_PIN 12 // пин пищалки
 
-GyverTM1637 disp(dispclkPin, dispdioPin);
+bool dots = false; // состояние точек индикатора
+int openCounter = 0; // счётчик открытий
+int secCounter = 0; // счётчик секунд
+bool IsWarning = false; // предупреждение о долгом открытии
+bool IsOpened = false; // предыдущее состояние дверцы
 
+Disp1637Colon disp(DIO_PIN, CLK_PIN); // идентификация индикатора
 
 void setup() {
   disp.clear();
   disp.brightness(7);  // яркость, 0 - 7 (минимум - максимум)
-  // initialize the LED pin as an output:
-  pinMode(ledPin, OUTPUT);
-  // initialize the pushbutton pin as an input:
-  dosignal(0);
+
+  pinMode(HYR_PIN, INPUT_PULLUP); // подтягивание гиркона через втроенный резистор
+  pinMode(LED_PIN, OUTPUT); // пин светодиода на выход
+
+  dosignal(0); // сигнал запуска
+
+  Serial.begin(9600);
 }
 
 void loop() {
-  if (tmr05.tick()) {
-    flag = !flag;
-    disp.point(flag);   // выкл/выкл точки
+  if (tmr05.tick() and IsOpened){ // мигание точками на индикаторе
+    dots = !dots;
+    disp.colon(dots);
+    
+    if (IsWarning){ // мигание светодиодом при долгом открытии
+      digitalWrite(LED_PIN, dots);
+    }
   }
-  if (tmr1.tick()) {
-    buttonState = digitalRead(buttonPin);
-    if (buttonState == HIGH) {
-      // freezer closed:
-      if (bIsOpened){
-        dosignal(3);
-        bIsWarning = false;
+
+  if (tmr1.tick()){
+    bool hyrStat = digitalRead(HYR_PIN); // получение состояния гиркона
+
+    // обновление состояния на открытый
+    if (hyrStat){
+      if (!IsOpened){
+        IsOpened = true;
+
+        dosignal(1); // сигнал открытия
+
+        secCounter = 0;
+        tmr10.start();
+
+        openCounter++;
+
+        disp.showClock(openCounter, secCounter);
+        digitalWrite(LED_PIN, 1);
       }
-      bIsOpened = false;
-      digitalWrite(ledPin, LOW);
-    } 
-    else {
-      // freezer opened:
-      if (!bIsOpened){
-        iSecCounter = 0;
-        dosignal(1);
-        iOpenCounter++;
-      }
-      iSecCounter++;
-      bIsOpened = true;
-      showondisplay(iOpenCounter,iSecCounter);
-      digitalWrite(ledPin, HIGH);
+
+      // обновление секундомера
+      secCounter++;
+      disp.showClock(openCounter, secCounter);
     }
 
+    // обновление состояния на закрытый
+    else {
+      if (IsOpened){
+        IsWarning = false;
+        IsOpened = false;
 
-    
-  };
+        dosignal(3); // сигнал закрытия
 
-  if (tmr10.tick()) {
-    bIsWarning = true;
-    dosignal(2);
+        tmr10.stop(); // остановка таймера предупреждения
+
+        digitalWrite(LED_PIN, 0);
+        disp.clear();
+        disp.update();
+      }
+    }
+  }
+
+  // активация режима предупреждения при долгом открытии
+  if (tmr10.tick()){
+    IsWarning = true;
+
+    dosignal(2); // сигнал предупреждения
+
+    tmr10.stop(); // остановка таймера предупреждения
   }
 }
 
-void showondisplay(uint8_t left2dig,uint8_t right2dig){
-  if (left2dig > 99) left2dig = 99;
-  if (right2dig > 99) right2dig = 99;
-  disp.clear();
-  disp.displayClock(left2dig,right2dig);
+// сокращение функции dosignal
+void ftone(int hz, int t){
+  tone(BUZZ_PIN, hz, t);
+  delay(t);
 }
 
+// функция для воспроизведения сигналов для оповещения
 void dosignal(byte sygnaltype){
   // 0 - START SIGNAL
   // 1 - OPEN SIGNAL
@@ -89,64 +111,26 @@ void dosignal(byte sygnaltype){
   // 3 - CLOSE SIGNAL
   switch (sygnaltype) {
     case 0:
-      tone(piezoPin, 1000, 1000);
-      delay(1000);
-      noTone(piezoPin);
+      ftone(1000, 1000);
       break;
     case 1:
-      tone(piezoPin, 600);
-      delay(100);
-      tone(piezoPin, 800);
-      delay(500);
-      noTone(piezoPin);
+      ftone(600, 100);
+      ftone(800, 500);
       break;
     case 2:
-      tone(piezoPin, 300);
-      delay(100);
-      tone(piezoPin, 100);
-      delay(500);
-      noTone(piezoPin);
+      ftone(300, 100);
+      ftone(100, 500);
       break;
     case 3:
-      tone(piezoPin, 1000, 200);
-      delay(200);
-      tone(piezoPin, 1300, 200);
-      delay(200);
-      tone(piezoPin, 1600, 200);
-      delay(200);
-      tone(piezoPin, 1300, 200);
-      delay(200);
-      tone(piezoPin, 1000, 200);
-      delay(200);
-      noTone(piezoPin);
+      ftone(1000, 200);
+      ftone(1300, 200);
+      ftone(1600, 200);
+      ftone(1300, 200);
+      ftone(1000, 200);
       break;
     default:
       break;
   }
-}
 
-void twistClock() {
-  byte hrs = 21, mins = 55;
-  uint32_t tmr;
-  Now = millis();
-  while (millis () - Now < 10000) {   // каждые 10 секунд
-    if (millis() - tmr > 1000) {       // каждые полсекунды
-      tmr = millis();
-      flag = !flag;
-      disp.point(flag);   // выкл/выкл точки
-
-      if (flag) {
-        // ***** часы! ****
-        mins ++;
-        if (mins > 59) {
-          mins = 0;
-          hrs++;
-          if (hrs > 24) hrs = 0;
-        }
-        // ***** часы! ****
-        disp.displayClockTwist(hrs, mins, 35);    // выводим время
-      }
-    }
-  }
-  disp.point(0);   // выкл точки
+  noTone(BUZZ_PIN);
 }
