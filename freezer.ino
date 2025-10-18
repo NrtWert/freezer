@@ -2,9 +2,9 @@
 #include <TimerMs.h> // библиотека для создания таймеров
 
 // объявление таймеров (мс, запущен/нет, период/таймер)
+TimerMs tmr025(500, 0, 0);
 TimerMs tmr05(500, 1, 0);
 TimerMs tmr1(1000, 1, 0);
-TimerMs tmr10(10000, 0, 1);
 
 // пины индикатора
 #define CLK_PIN 8
@@ -17,10 +17,11 @@ TimerMs tmr10(10000, 0, 1);
 #define BUZZ_PIN 12 // пин пищалки
 
 bool dots = false; // состояние точек индикатора
+short Warning = 0; // предупреждение о долгом открытии
+bool IsOpened = false; // предыдущее состояние дверцы
+int secOnDay = 0; // счёчик секунд за день
 int openCounter = 0; // счётчик открытий
 int secCounter = 0; // счётчик секунд
-bool IsWarning = false; // предупреждение о долгом открытии
-bool IsOpened = false; // предыдущее состояние дверцы
 
 Disp1637Colon disp(DIO_PIN, CLK_PIN); // идентификация индикатора
 
@@ -41,9 +42,21 @@ void loop() {
     dots = !dots;
     disp.colon(dots);
     
-    if (IsWarning){ // мигание светодиодом при долгом открытии
+    if (Warning >= 1){ // мигание светодиодом при долгом открытии
       digitalWrite(LED_PIN, dots);
+      if (Warning == 2){
+        ftone(1000, 200);
+      }
+      if (Warning == 3){
+        int x = 0;
+        if (dots){x = 11;}
+        disp.showClock(openCounter, x);
+      }
     }
+  }
+
+  if (tmr025.tick()){
+    ftone(1300, 100);
   }
 
   if (tmr1.tick()){
@@ -56,44 +69,56 @@ void loop() {
 
         dosignal(1); // сигнал открытия
 
+        disp.showClock(secCounter / 60, secCounter % 60);
         secCounter = 0;
-        tmr10.start();
 
         openCounter++;
 
-        disp.showClock(openCounter, secCounter);
         digitalWrite(LED_PIN, 1);
       }
 
       // обновление секундомера
       secCounter++;
-      disp.showClock(openCounter, secCounter);
+      
+      if (secCounter > 4 and secCounter < 8){
+        disp.showClock(secOnDay / 60, secOnDay % 60);
+      }
+      else if (secCounter > 7){
+        if (secCounter <= 90){
+          disp.showClock(openCounter, secCounter);
+        }
+        else {
+          Warning = 3;
+          tmr025.start();
+        }
+      }
+
+      if (secCounter == 30){
+        dosignal(2);
+        Warning = 1;
+      }
+      else if (secCounter == 60){
+        Warning = 2;
+      }
     }
 
     // обновление состояния на закрытый
     else {
       if (IsOpened){
-        IsWarning = false;
+        Warning = 0;
         IsOpened = false;
+
+        secOnDay += secCounter; // обновление счётчика за день
 
         dosignal(3); // сигнал закрытия
 
-        tmr10.stop(); // остановка таймера предупреждения
+        tmr025.stop();
 
         digitalWrite(LED_PIN, 0);
         disp.clear();
         disp.update();
       }
     }
-  }
-
-  // активация режима предупреждения при долгом открытии
-  if (tmr10.tick()){
-    IsWarning = true;
-
-    dosignal(2); // сигнал предупреждения
-
-    tmr10.stop(); // остановка таймера предупреждения
   }
 }
 
@@ -118,8 +143,8 @@ void dosignal(byte sygnaltype){
       ftone(800, 500);
       break;
     case 2:
-      ftone(300, 100);
-      ftone(100, 500);
+      ftone(1000, 400);
+      ftone(1300, 500);
       break;
     case 3:
       ftone(1000, 200);
