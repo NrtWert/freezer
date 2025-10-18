@@ -2,8 +2,8 @@
 #include <TimerMs.h> // библиотека для создания таймеров
 
 // объявление таймеров (мс, запущен/нет, период/таймер)
-TimerMs tmr025(500, 0, 0);
-TimerMs tmr05(500, 1, 0);
+TimerMs tmr025(250, 0, 0);
+TimerMs tmr05(500, 0, 0);
 TimerMs tmr1(1000, 1, 0);
 
 // пины индикатора
@@ -17,6 +17,7 @@ TimerMs tmr1(1000, 1, 0);
 #define BUZZ_PIN 12 // пин пищалки
 
 bool dots = false; // состояние точек индикатора
+bool led = false; // состояние светодиода
 short Warning = 0; // предупреждение о долгом открытии
 bool IsOpened = false; // предыдущее состояние дверцы
 int secOnDay = 0; // счёчик секунд за день
@@ -38,25 +39,20 @@ void setup() {
 }
 
 void loop() {
-  if (tmr05.tick() and IsOpened){ // мигание точками на индикаторе
-    dots = !dots;
-    disp.colon(dots);
-    
+  if (tmr05.tick() and IsOpened){    
     if (Warning >= 1){ // мигание светодиодом при долгом открытии
-      digitalWrite(LED_PIN, dots);
+      digitalWrite(LED_PIN, led);
+      led = !led;
       if (Warning == 2){
-        ftone(1000, 200);
-      }
-      if (Warning == 3){
-        int x = 0;
-        if (dots){x = 11;}
-        disp.showClock(openCounter, x);
+        ftone(300, 200);
       }
     }
   }
 
   if (tmr025.tick()){
-    ftone(1300, 100);
+    ftone(1000, 100);
+    digitalWrite(LED_PIN, led);
+    led = !led;
   }
 
   if (tmr1.tick()){
@@ -83,22 +79,34 @@ void loop() {
       if (secCounter > 4 and secCounter < 8){
         disp.showClock(secOnDay / 60, secOnDay % 60);
       }
-      else if (secCounter > 7){
-        if (secCounter <= 90){
-          disp.showClock(openCounter, secCounter);
-        }
-        else {
-          Warning = 3;
-          tmr025.start();
-        }
+      else if (secCounter > 8 and secCounter <= 90){
+        disp.showClock(openCounter, secCounter);
       }
 
       if (secCounter == 30){
         dosignal(2);
+
         Warning = 1;
+
+        tmr05.start();
       }
       else if (secCounter == 60){
         Warning = 2;
+      }
+      else if (secCounter == 90){
+        disp.setCursor(0);
+        disp.print("alrt");
+        disp.update();
+
+        Warning = 3;
+
+        tmr05.stop();
+        tmr025.start();
+      }
+
+      if (Warning != 3){
+        disp.colon(dots);
+        dots = !dots;
       }
     }
 
@@ -113,6 +121,7 @@ void loop() {
         dosignal(3); // сигнал закрытия
 
         tmr025.stop();
+        tmr05.stop();
 
         digitalWrite(LED_PIN, 0);
         disp.clear();
