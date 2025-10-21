@@ -1,5 +1,8 @@
 #include <GyverSegment.h> // библиотека для TM1637
 #include <TimerMs.h> // библиотека для создания таймеров
+#include <GyverDS3231Min.h> // библиотека RTC
+
+GyverDS3231Min rtc;
 
 // объявление таймеров (мс, запущен/нет, период/таймер)
 TimerMs tmr025(250, 0, 0);
@@ -16,6 +19,7 @@ TimerMs tmr1(1000, 1, 0);
 
 #define BUZZ_PIN 12 // пин пищалки
 
+bool zeroing = false; // было ли произведено обнуление
 bool dots = false; // состояние точек индикатора
 bool led = false; // состояние светодиода
 short Warning = 0; // предупреждение о долгом открытии
@@ -27,6 +31,15 @@ int secCounter = 0; // счётчик секунд
 Disp1637Colon disp(DIO_PIN, CLK_PIN); // идентификация индикатора
 
 void setup() {
+  setStampZone(3); // часовой пояс
+
+  Wire.begin();
+  rtc.begin();
+
+  if (rtc.isReset()) { // если время было сброшено
+      rtc.setBuildTime(); // установить время компиляции
+  }
+
   disp.clear();
   disp.brightness(7);  // яркость, 0 - 7 (минимум - максимум)
 
@@ -35,7 +48,7 @@ void setup() {
 
   dosignal(0); // сигнал запуска
 
-  Serial.begin(9600);
+  // Serial.begin(9600);
 }
 
 void loop() {
@@ -57,6 +70,17 @@ void loop() {
 
   if (tmr1.tick()){
     bool hyrStat = digitalRead(HYR_PIN); // получение состояния гиркона
+
+    // обнуление в полночь
+    if (rtc.getTime().hour == 0 and !zeroing and !IsOpened){
+      zeroing = true;
+      secOnDay = 0;
+      openCounter = 0;
+      secCounter = 0;
+    }
+    else if (rtc.getTime().hour != 0 and zeroing){
+      zeroing = false;
+    }
 
     // обновление состояния на открытый
     if (hyrStat){
